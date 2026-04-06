@@ -90,3 +90,4 @@ RSS_FEED_URLS=["https://www.prothomalo.com/feed"]
 - add ranking pipeline and embeddings with `pgvector`
 - add more BD publisher feeds and per-source category mapping
 # shongkhep-backend
+# shongkhep-backend
