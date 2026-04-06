@@ -10,7 +10,7 @@ FastAPI backend for the Shongkhep app with RSS ingestion.
 - modular layers for `api`, `services`, `repositories`, `models`, and `workers`
 - future-ready `users` and `user_preferences` tables for auth and personalization
 - RSS ingestion for BD publishers like Prothom Alo
-- summaries generated from the first 50 words of the RSS article text
+- summaries generated from the first 59 words of the RSS article text
 
 ## Local setup
 
@@ -74,7 +74,8 @@ python -m app.db.seed
 Default BD RSS source:
 
 ```bash
-RSS_FEED_URLS=["https://www.prothomalo.com/feed"]
+RSS_FEED_URLS_EN=["https://en.prothomalo.com/stories.rss"]
+RSS_FEED_URLS_BN=["https://www.prothomalo.com/feed"]
 ```
 
 ## API surface

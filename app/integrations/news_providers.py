@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html import unescape
+from re import sub
 from urllib.parse import urlparse
 
 import feedparser
@@ -13,6 +14,7 @@ from app.core.config import settings
 @dataclass
 class ProviderArticle:
     canonical_url: str
+    language: str
     source_name: str
     category: str
     image_url: str | None
@@ -23,20 +25,34 @@ class ProviderArticle:
 
 
 class BaseNewsProviderClient:
-    async def fetch_feed(self) -> list[ProviderArticle]:
+    async def fetch_feed(
+        self, language: str | None = None, category: str | None = None
+    ) -> list[ProviderArticle]:
         raise NotImplementedError
 
 
 class RssFeedClient(BaseNewsProviderClient):
-    async def fetch_feed(self) -> list[ProviderArticle]:
+    async def fetch_feed(
+        self, language: str | None = None, category: str | None = None
+    ) -> list[ProviderArticle]:
         results: list[ProviderArticle] = []
+        feed_groups = _select_feed_groups(language=language, category=category)
+
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            for feed_url in settings.rss_feed_urls:
-                response = await client.get(feed_url)
-                response.raise_for_status()
-                parsed = feedparser.parse(response.text)
-                source_name = _rss_source_name(parsed.feed, feed_url)
-                results.extend(_map_rss_payload(parsed.entries, source_name))
+            for feed_language, feed_entries in feed_groups.items():
+                for feed_url, forced_category in feed_entries:
+                    response = await client.get(feed_url)
+                    response.raise_for_status()
+                    parsed = feedparser.parse(response.text)
+                    source_name = _rss_source_name(parsed.feed, feed_url)
+                    results.extend(
+                        _map_rss_payload(
+                            parsed.entries,
+                            source_name,
+                            feed_language,
+                            forced_category=forced_category,
+                        )
+                    )
         return _dedupe_articles(results)
 
 
@@ -51,7 +67,24 @@ def _dedupe_articles(articles: list[ProviderArticle]) -> list[ProviderArticle]:
     return list(deduped.values())
 
 
-def _map_rss_payload(entries: list, source_name: str) -> list[ProviderArticle]:
+def _select_feed_groups(
+    *, language: str | None, category: str | None
+) -> dict[str, list[tuple[str, str | None]]]:
+    normalized_language = "bn" if language == "bn" else "en"
+
+    if normalized_language == "en":
+        return {"en": [(feed_url, None) for feed_url in settings.rss_feed_urls_en]}
+
+    return {"bn": [(feed_url, None) for feed_url in settings.rss_feed_urls_bn]}
+
+
+def _map_rss_payload(
+    entries: list,
+    source_name: str,
+    language: str,
+    *,
+    forced_category: str | None = None,
+) -> list[ProviderArticle]:
     articles: list[ProviderArticle] = []
     for entry in entries:
         link = entry.get("link")
@@ -59,19 +92,18 @@ def _map_rss_payload(entries: list, source_name: str) -> list[ProviderArticle]:
         if not link or not title:
             continue
 
-        description = _clean_text(
-            entry.get("summary", "") or entry.get("description", "") or ""
-        )
-        body = description
+        description = _extract_rss_text(entry, prefer_full_text=False)
+        body = _extract_rss_text(entry, prefer_full_text=True) or description or title
         image_url = _extract_rss_image(entry)
         published_at = _parse_rss_datetime(
             entry.get("published") or entry.get("updated") or entry.get("pubDate")
         )
-        category = _infer_rss_category(entry)
+        category = forced_category or _infer_rss_category(entry)
 
         articles.append(
             ProviderArticle(
                 canonical_url=link,
+                language=language,
                 source_name=source_name,
                 category=category,
                 image_url=image_url,
@@ -140,4 +172,32 @@ def _parse_rss_datetime(value: str | None) -> datetime:
 
 
 def _clean_text(value: str) -> str:
-    return unescape(value).strip()
+    return sub(r"\s+", " ", unescape(sub(r"<[^>]+>", " ", value))).strip()
+
+
+def _extract_rss_text(entry: dict, *, prefer_full_text: bool) -> str:
+    candidates: list[str] = []
+
+    if prefer_full_text:
+        content = entry.get("content", [])
+        if content:
+            candidates.extend(item.get("value", "") for item in content)
+        candidates.append(entry.get("summary_detail", {}).get("value", ""))
+
+    candidates.extend(
+        [
+            entry.get("summary", ""),
+            entry.get("description", ""),
+            entry.get("content:encoded", ""),
+        ]
+    )
+
+    if not prefer_full_text:
+        candidates.append(entry.get("summary_detail", {}).get("value", ""))
+
+    for candidate in candidates:
+        cleaned = _clean_text(candidate)
+        if cleaned:
+            return cleaned
+
+    return ""

@@ -26,12 +26,15 @@ async def trigger_news_sync() -> QueueSyncResponse:
 
 
 @router.post("/sync-now", response_model=SyncResponse)
-async def sync_news_now() -> SyncResponse:
+async def sync_news_now(
+    language: str | None = Query(default=None, pattern="^(en|bn)$"),
+    category: str | None = Query(default=None),
+) -> SyncResponse:
     service = await IngestionService.create_for_worker()
     try:
-        articles = await IngestionService.fetch_provider_payload()
-        if not articles:
-            articles = IngestionService.build_demo_payload()
+        articles = await IngestionService.fetch_provider_payload(
+            language=language, category=category
+        )
         inserted = await service.ingest_articles(articles)
         return SyncResponse(inserted=inserted, status="ok")
     finally:

@@ -12,8 +12,7 @@ from app.core.logging import configure_logging
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     configure_logging()
-    if settings.auto_create_tables:
-        await create_db_and_tables()
+    await create_db_and_tables()
     yield
 
 

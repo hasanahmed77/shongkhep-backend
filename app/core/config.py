@@ -20,7 +20,16 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://localhost:6379/2"
 
     cors_origins: list[str] = ["*"]
-    rss_feed_urls: list[str] = ["https://www.prothomalo.com/feed"]
+    rss_feed_urls_en: list[str] = [
+        "https://en.prothomalo.com/stories.rss",
+        "https://www.thedailystar.net/frontpage/rss.xml",
+        "https://www.bd24live.com/feed",
+        "https://bdnews24.com/?widgetName=rssfeed&widgetId=1150&getXmlFeed=true",
+    ]
+    rss_feed_urls_bn: list[str] = [
+        "https://www.prothomalo.com/feed",
+        "https://www.jagonews24.com/rss/rss.xml",
+    ]
     default_page_size: int = 20
 
 

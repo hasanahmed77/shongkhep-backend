@@ -1,6 +1,4 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -11,6 +9,7 @@ from app.repositories.article import ArticleRepository
 @dataclass
 class InboundArticle:
     canonical_url: str
+    language: str
     source_name: str
     category: str
     image_url: str | None
@@ -35,7 +34,7 @@ class IngestionService:
                     category=inbound.category,
                     image_url=inbound.image_url,
                     published_at=inbound.published_at,
-                    language="en",
+                    language=inbound.language,
                     title=inbound.title,
                     summary=summary,
                     article_body=inbound.body,
@@ -55,59 +54,18 @@ class IngestionService:
         repository = ArticleRepository(session)
         return IngestionService(repository)
 
-    @staticmethod
-    def build_demo_payload() -> list[InboundArticle]:
-        timestamp = datetime.now(UTC)
-        return [
-            InboundArticle(
-                canonical_url="https://example.com/world-energy-transition",
-                source_name="Global Dispatch",
-                category="World",
-                image_url=(
-                    "https://images.unsplash.com/photo-1541872705-1f73c6400ec9"
-                    "?auto=format&fit=crop&w=1200&q=80"
-                ),
-                title="Nations accelerate clean energy deals before winter demand rises",
-                description=(
-                    "Governments are racing to secure power supply agreements ahead of winter."
-                ),
-                body=(
-                    "Energy ministers entered a new round of talks this week to secure supply "
-                    "stability before peak winter demand. The agreements combine immediate "
-                    "resilience measures with long-term grid and renewables investment."
-                ),
-                published_at=timestamp,
-            ),
-            InboundArticle(
-                canonical_url="https://example.com/ai-phone-rollout",
-                source_name="Circuit Weekly",
-                category="Technology",
-                image_url=(
-                    "https://images.unsplash.com/photo-1516321318423-f06f85e504b3"
-                    "?auto=format&fit=crop&w=1200&q=80"
-                ),
-                title="AI-first phones push offline translation and summarization to the edge",
-                description=(
-                    "Manufacturers are moving premium AI features from the cloud onto devices."
-                ),
-                body=(
-                    "Manufacturers are shifting premium mobile features from cloud-only workflows "
-                    "to on-device models, reducing latency and improving privacy for users."
-                ),
-                published_at=timestamp,
-            ),
-        ]
-
-    @staticmethod
-    async def fetch_provider_payload() -> list[InboundArticle]:
+    async def fetch_provider_payload(
+        language: str | None = None, category: str | None = None
+    ) -> list[InboundArticle]:
         provider = get_news_provider_client()
-        articles = await provider.fetch_feed()
+        articles = await provider.fetch_feed(language=language, category=category)
         return [IngestionService._from_provider_article(article) for article in articles if article.body]
 
     @staticmethod
     def _from_provider_article(article: ProviderArticle) -> InboundArticle:
         return InboundArticle(
             canonical_url=article.canonical_url,
+            language=article.language,
             source_name=article.source_name,
             category=article.category,
             image_url=article.image_url,
