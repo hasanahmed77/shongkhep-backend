@@ -27,3 +27,8 @@ class FeedResponse(BaseModel):
 class QueueSyncResponse(BaseModel):
     task_id: str
     status: str
+
+
+class SyncResponse(BaseModel):
+    inserted: int
+    status: str
