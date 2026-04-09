@@ -12,6 +12,7 @@ router = APIRouter()
 @router.get("/{language}", response_model=FeedResponse)
 async def get_news_feed(
     language: str,
+    vertical: str = Query(default="news"),
     category: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     before: str | None = Query(default=None),
@@ -20,6 +21,7 @@ async def get_news_feed(
     ) -> FeedResponse:
     return await service.get_feed(
         language=language,
+        vertical=vertical,
         category=category,
         limit=limit,
         before=before,
@@ -30,11 +32,12 @@ async def get_news_feed(
 @router.get("/{language}/updates", response_model=FeedUpdatesResponse)
 async def get_news_feed_updates(
     language: str,
+    vertical: str = Query(default="news"),
     category: str | None = Query(default=None),
     after: str | None = Query(default=None),
     service: NewsFeedService = Depends(get_news_feed_service),
 ) -> FeedUpdatesResponse:
-    return await service.get_feed_updates(language=language, category=category, after=after)
+    return await service.get_feed_updates(language=language, vertical=vertical, category=category, after=after)
 
 
 @router.post("/sync", response_model=QueueSyncResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -46,12 +49,13 @@ async def trigger_news_sync() -> QueueSyncResponse:
 @router.post("/sync-now", response_model=SyncResponse)
 async def sync_news_now(
     language: str | None = Query(default=None, pattern="^(en|bn)$"),
+    vertical: str | None = Query(default=None),
     category: str | None = Query(default=None),
 ) -> SyncResponse:
     service = await IngestionService.create_for_worker()
     try:
         articles = await IngestionService.fetch_provider_payload(
-            language=language, category=category
+            language=language, vertical=vertical, category=category
         )
         inserted = await service.ingest_articles(articles)
         return SyncResponse(inserted=inserted, status="ok")

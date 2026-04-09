@@ -30,6 +30,19 @@ class Settings(BaseSettings):
         "https://www.prothomalo.com/feed",
         "https://www.jagonews24.com/rss/rss.xml",
     ]
+    rss_feed_urls_en_tech: list[str] = [
+        "https://blog.google/rss/",
+        "https://techcrunch.com/feed/",
+    ]
+    rss_feed_urls_en_science: list[str] = [
+        "https://www.nasa.gov/news-release/feed/",
+        "https://www.jpl.nasa.gov/feeds/news/",
+    ]
+    rss_feed_urls_en_gaming: list[str] = [
+        "https://blog.playstation.com/feed/",
+        "https://blog.playstation.com/category/ps-store/feed/",
+        "https://news.xbox.com/en-us/feed/",
+    ]
     default_page_size: int = 20
     feed_sync_interval_minutes: int = 10
 

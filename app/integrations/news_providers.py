@@ -16,6 +16,7 @@ from app.core.config import settings
 class ProviderArticle:
     canonical_url: str
     language: str
+    vertical: str
     source_name: str
     source_url: str
     category: str
@@ -30,20 +31,20 @@ class ProviderArticle:
 
 class BaseNewsProviderClient:
     async def fetch_feed(
-        self, language: str | None = None, category: str | None = None
+        self, language: str | None = None, vertical: str | None = None, category: str | None = None
     ) -> list[ProviderArticle]:
         raise NotImplementedError
 
 
 class RssFeedClient(BaseNewsProviderClient):
     async def fetch_feed(
-        self, language: str | None = None, category: str | None = None
+        self, language: str | None = None, vertical: str | None = None, category: str | None = None
     ) -> list[ProviderArticle]:
         results: list[ProviderArticle] = []
-        feed_groups = _select_feed_groups(language=language, category=category)
+        feed_groups = _select_feed_groups(language=language, vertical=vertical, category=category)
 
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            for feed_language, feed_entries in feed_groups.items():
+            for feed_language, feed_vertical, feed_entries in feed_groups:
                 for feed_url, forced_category in feed_entries:
                     response = await client.get(feed_url)
                     response.raise_for_status()
@@ -54,6 +55,7 @@ class RssFeedClient(BaseNewsProviderClient):
                             parsed.entries,
                             source_name,
                             feed_language,
+                            feed_vertical,
                             forced_category=forced_category,
                         )
                     )
@@ -72,20 +74,45 @@ def _dedupe_articles(articles: list[ProviderArticle]) -> list[ProviderArticle]:
 
 
 def _select_feed_groups(
-    *, language: str | None, category: str | None
-) -> dict[str, list[tuple[str, str | None]]]:
-    normalized_language = "bn" if language == "bn" else "en"
+    *, language: str | None, vertical: str | None, category: str | None
+) -> list[tuple[str, str, list[tuple[str, str | None]]]]:
+    normalized_vertical = (vertical or "").casefold()
 
-    if normalized_language == "en":
-        return {"en": [(feed_url, None) for feed_url in settings.rss_feed_urls_en]}
+    all_groups = {
+        "en": {
+            "news": [(feed_url, None) for feed_url in settings.rss_feed_urls_en],
+            "tech": [(feed_url, None) for feed_url in settings.rss_feed_urls_en_tech],
+            "science": [(feed_url, None) for feed_url in settings.rss_feed_urls_en_science],
+            "gaming": [(feed_url, None) for feed_url in settings.rss_feed_urls_en_gaming],
+        },
+        "bn": {
+            "news": [(feed_url, None) for feed_url in settings.rss_feed_urls_bn],
+        },
+    }
 
-    return {"bn": [(feed_url, None) for feed_url in settings.rss_feed_urls_bn]}
+    selected_languages = [language] if language in all_groups else list(all_groups.keys())
+    selected_verticals = (
+        [normalized_vertical]
+        if normalized_vertical
+        else []
+    )
+
+    groups: list[tuple[str, str, list[tuple[str, str | None]]]] = []
+    for selected_language in selected_languages:
+        available_verticals = all_groups.get(selected_language, {})
+        verticals_for_language = selected_verticals or list(available_verticals.keys())
+        for selected in verticals_for_language:
+            feeds = available_verticals.get(selected)
+            if feeds:
+                groups.append((selected_language, selected, feeds))
+    return groups
 
 
 def _map_rss_payload(
     entries: list,
     source_name: str,
     language: str,
+    vertical: str,
     *,
     forced_category: str | None = None,
 ) -> list[ProviderArticle]:
@@ -102,12 +129,13 @@ def _map_rss_payload(
         published_at = _parse_rss_datetime(
             entry.get("published") or entry.get("updated") or entry.get("pubDate")
         )
-        category = forced_category or _infer_rss_category(entry)
+        category = forced_category or _infer_rss_category(entry, vertical=vertical)
 
         articles.append(
             ProviderArticle(
                 canonical_url=link,
                 language=language,
+                vertical=vertical,
                 source_name=source_name,
                 source_url=link,
                 category=category,
@@ -152,8 +180,50 @@ def _extract_rss_image(entry: dict) -> str | None:
     return None
 
 
-def _infer_rss_category(entry: dict) -> str:
+def _infer_rss_category(entry: dict, *, vertical: str) -> str:
     tags = entry.get("tags", [])
+    if vertical == "tech":
+        for tag in tags:
+            term = _clean_text(tag.get("term", ""))
+            normalized = term.casefold()
+            if "ai" in normalized:
+                return "AI"
+            if "startup" in normalized:
+                return "Startups"
+            if "device" in normalized or "hardware" in normalized or "pixel" in normalized:
+                return "Devices"
+            if "android" in normalized or "platform" in normalized or "cloud" in normalized:
+                return "Platforms"
+        return "AI"
+    if vertical == "science":
+        for tag in tags:
+            term = _clean_text(tag.get("term", ""))
+            normalized = term.casefold()
+            if "space" in normalized or "mars" in normalized or "moon" in normalized:
+                return "Space"
+            if "research" in normalized or "study" in normalized:
+                return "Research"
+            if "health" in normalized or "medicine" in normalized:
+                return "Health"
+            if "climate" in normalized or "earth" in normalized or "environment" in normalized:
+                return "Climate"
+        return "Research"
+    if vertical == "gaming":
+        source_url = _clean_text(entry.get("link", "")).casefold()
+        if "ps-store" in source_url or "store" in source_url or "sale" in source_url or "discount" in source_url:
+            return "Sales"
+        for tag in tags:
+            term = _clean_text(tag.get("term", ""))
+            normalized = term.casefold()
+            if "sale" in normalized or "discount" in normalized or "store" in normalized:
+                return "Sales"
+            if "release" in normalized or "launch" in normalized:
+                return "Releases"
+            if "review" in normalized:
+                return "Reviews"
+            if "xbox" in normalized or "playstation" in normalized or "platform" in normalized:
+                return "Platform News"
+        return "Platform News"
     for tag in tags:
         term = _clean_text(tag.get("term", ""))
         normalized = term.casefold()

@@ -13,6 +13,7 @@ class NewsFeedService:
         self,
         *,
         language: str,
+        vertical: str,
         category: str | None,
         limit: int,
         before: str | None,
@@ -23,6 +24,7 @@ class NewsFeedService:
         after_cursor = _decode_cursor(after)
         rows = await self.article_repository.list_feed(
             language=normalized_language,
+            vertical=vertical,
             category=category,
             limit=limit + 1,
             before=before_cursor,
@@ -34,6 +36,7 @@ class NewsFeedService:
             NewsItemResponse(
                 id=cluster.id,
                 cursor=_encode_cursor(cluster, article),
+                vertical=cluster.vertical,
                 category=cluster.category,
                 image_url=article.image_url,
                 source_name=article.source_name,
@@ -54,12 +57,13 @@ class NewsFeedService:
         )
 
     async def get_feed_updates(
-        self, *, language: str, category: str | None, after: str | None
+        self, *, language: str, vertical: str, category: str | None, after: str | None
     ) -> FeedUpdatesResponse:
         normalized_language = "bn" if language == "bn" else "en"
         after_cursor = _decode_cursor(after)
         new_count, latest_cursor = await self.article_repository.get_feed_updates(
             language=normalized_language,
+            vertical=vertical,
             category=category,
             after=after_cursor,
         )

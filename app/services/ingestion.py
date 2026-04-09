@@ -13,6 +13,7 @@ from app.repositories.article import ArticleRepository
 class InboundArticle:
     canonical_url: str
     language: str
+    vertical: str
     source_name: str
     source_url: str
     category: str
@@ -37,6 +38,7 @@ class IngestionService:
                 await self.article_repository.upsert_article(
                     canonical_url=inbound.canonical_url,
                     source_name=inbound.source_name,
+                    vertical=inbound.vertical,
                     category=inbound.category,
                     image_url=inbound.image_url,
                     published_at=inbound.published_at,
@@ -50,6 +52,7 @@ class IngestionService:
                         "source_name": inbound.source_name,
                         "source_url": inbound.source_url,
                         "language": inbound.language,
+                        "vertical": inbound.vertical,
                         "entry_guid": inbound.entry_guid,
                         "content_hash": self._content_hash(inbound),
                         "category_hint": inbound.category,
@@ -71,10 +74,10 @@ class IngestionService:
         return IngestionService(repository)
 
     async def fetch_provider_payload(
-        language: str | None = None, category: str | None = None
+        language: str | None = None, vertical: str | None = None, category: str | None = None
     ) -> list[InboundArticle]:
         provider = get_news_provider_client()
-        articles = await provider.fetch_feed(language=language, category=category)
+        articles = await provider.fetch_feed(language=language, vertical=vertical, category=category)
         return [IngestionService._from_provider_article(article) for article in articles if article.body]
 
     @staticmethod
@@ -82,6 +85,7 @@ class IngestionService:
         return InboundArticle(
             canonical_url=article.canonical_url,
             language=article.language,
+            vertical=article.vertical,
             source_name=article.source_name,
             source_url=article.source_url,
             category=article.category,

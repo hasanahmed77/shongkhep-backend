@@ -16,6 +16,7 @@ class Article(Base):
     canonical_url: Mapped[str] = mapped_column(String(1024), unique=True, index=True)
     source_name: Mapped[str] = mapped_column(String(255), index=True)
     source_domain: Mapped[str] = mapped_column(String(255), index=True)
+    vertical: Mapped[str] = mapped_column(String(32), index=True, default="news")
     category: Mapped[str] = mapped_column(String(64), index=True)
     story_cluster_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("story_clusters.id", ondelete="SET NULL"), nullable=True, index=True
@@ -89,6 +90,7 @@ class StoryCluster(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     language: Mapped[str] = mapped_column(String(10), index=True)
+    vertical: Mapped[str] = mapped_column(String(32), index=True, default="news")
     category: Mapped[str] = mapped_column(String(64), index=True)
     representative_article_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -124,6 +126,7 @@ class RawFeedEntry(Base):
     source_name: Mapped[str] = mapped_column(String(255), index=True)
     source_url: Mapped[str] = mapped_column(String(1024))
     language: Mapped[str] = mapped_column(String(10), index=True)
+    vertical: Mapped[str] = mapped_column(String(32), index=True, default="news")
     entry_guid: Mapped[str] = mapped_column(String(1024))
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     category_hint: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -137,10 +140,13 @@ class RawFeedEntry(Base):
 
 class FeedState(Base):
     __tablename__ = "feed_states"
-    __table_args__ = (UniqueConstraint("language", "category", name="uq_feed_state_language_category"),)
+    __table_args__ = (
+        UniqueConstraint("language", "vertical", "category", name="uq_feed_state_language_vertical_category"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     language: Mapped[str] = mapped_column(String(10), index=True)
+    vertical: Mapped[str] = mapped_column(String(32), index=True, default="news")
     category: Mapped[str] = mapped_column(String(64), index=True)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     latest_cursor: Mapped[str | None] = mapped_column(String(255), nullable=True)

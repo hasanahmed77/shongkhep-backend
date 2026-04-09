@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 class NewsItemResponse(BaseModel):
     id: UUID
     cursor: str
+    vertical: str
     category: str
     image_url: str | None
     source_name: str

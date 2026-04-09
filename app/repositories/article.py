@@ -17,6 +17,7 @@ class ArticleRepository:
         self,
         *,
         language: str,
+        vertical: str,
         category: str | None,
         limit: int,
         before: tuple[int, datetime, str] | None = None,
@@ -27,6 +28,7 @@ class ArticleRepository:
             .join(Article, Article.id == StoryCluster.representative_article_id)
             .join(ArticleTranslation, ArticleTranslation.article_id == Article.id)
             .where(StoryCluster.language == language)
+            .where(StoryCluster.vertical == vertical)
             .where(ArticleTranslation.language == language)
             .order_by(
                 Article.source_priority.desc(),
@@ -78,14 +80,15 @@ class ArticleRepository:
         self,
         *,
         language: str,
+        vertical: str,
         category: str | None,
-        after: tuple[datetime, str] | None,
+        after: tuple[int, datetime, str] | None,
         limit: int = 20,
     ) -> tuple[int, str | None]:
         if after is None:
             return 0, None
 
-        state = await self.get_feed_state(language=language, category=category or "All")
+        state = await self.get_feed_state(language=language, vertical=vertical, category=category or "All")
         if state is None or state.latest_cursor is None or state.latest_cursor == _encode_cursor_parts(*after):
             return 0, state.latest_cursor if state else None
 
@@ -94,6 +97,7 @@ class ArticleRepository:
             .select_from(StoryCluster)
             .join(Article, Article.id == StoryCluster.representative_article_id)
             .where(StoryCluster.language == language)
+            .where(StoryCluster.vertical == vertical)
             .where(_newer_than_cursor(after))
         )
         if category:
@@ -125,6 +129,7 @@ class ArticleRepository:
         self,
         *,
         language: str,
+        vertical: str,
         title: str,
         category: str,
         article_body: str,
@@ -134,6 +139,7 @@ class ArticleRepository:
             select(Article, ArticleTranslation)
             .join(ArticleTranslation, ArticleTranslation.article_id == Article.id)
             .where(ArticleTranslation.language == language)
+            .where(Article.vertical == vertical)
             .where(Article.category == category)
             .order_by(Article.published_at.desc().nullslast(), Article.created_at.desc())
             .limit(40)
@@ -162,10 +168,11 @@ class ArticleRepository:
         return None
 
     async def create_story_cluster(
-        self, *, language: str, category: str, representative_article: Article | None = None
+        self, *, language: str, vertical: str, category: str, representative_article: Article | None = None
     ) -> StoryCluster:
         cluster = StoryCluster(
             language=language,
+            vertical=vertical,
             category=category,
             representative_article_id=representative_article.id if representative_article else None,
         )
@@ -176,12 +183,12 @@ class ArticleRepository:
         return cluster
 
     async def ensure_story_cluster(
-        self, *, article: Article, language: str, category: str
+        self, *, article: Article, language: str, vertical: str, category: str
     ) -> StoryCluster:
         if article.story_cluster is not None:
             return article.story_cluster
 
-        cluster = await self.create_story_cluster(language=language, category=category)
+        cluster = await self.create_story_cluster(language=language, vertical=vertical, category=category)
         article.story_cluster_id = cluster.id
         cluster.representative_article_id = article.id
         return cluster
@@ -211,6 +218,7 @@ class ArticleRepository:
         *,
         canonical_url: str,
         source_name: str,
+        vertical: str,
         category: str,
         image_url: str | None,
         published_at: datetime | None,
@@ -226,11 +234,12 @@ class ArticleRepository:
         cluster: StoryCluster | None = None
         if article is not None:
             cluster = await self.ensure_story_cluster(
-                article=article, language=language, category=category
+                article=article, language=language, vertical=vertical, category=category
             )
         else:
             duplicate_candidate = await self.find_duplicate_candidate(
                 language=language,
+                vertical=vertical,
                 title=title,
                 category=category,
                 article_body=article_body,
@@ -240,6 +249,7 @@ class ArticleRepository:
                 cluster = await self.ensure_story_cluster(
                     article=duplicate_candidate,
                     language=language,
+                    vertical=vertical,
                     category=category,
                 )
 
@@ -248,6 +258,7 @@ class ArticleRepository:
                 canonical_url=canonical_url,
                 source_name=source_name,
                 source_domain=urlparse(canonical_url).netloc,
+                vertical=vertical,
                 category=category,
                 story_cluster_id=cluster.id if cluster else None,
                 image_url=image_url,
@@ -261,12 +272,14 @@ class ArticleRepository:
             if cluster is None:
                 cluster = await self.create_story_cluster(
                     language=language,
+                    vertical=vertical,
                     category=category,
                     representative_article=article,
                 )
         else:
             article.source_name = source_name
             article.source_domain = urlparse(canonical_url).netloc
+            article.vertical = vertical
             article.category = category
             article.image_url = image_url
             article.published_at = published_at or article.published_at
@@ -292,10 +305,11 @@ class ArticleRepository:
             await self.upsert_raw_entry(article_id=article.id, **raw_entry)
 
         if cluster is not None:
+            cluster.vertical = vertical
             cluster.category = category
             await self.maybe_promote_representative(cluster=cluster, article=article)
-            await self.touch_feed_state(language=language, category=category, cluster=cluster)
-            await self.touch_feed_state(language=language, category="All", cluster=cluster)
+            await self.touch_feed_state(language=language, vertical=vertical, category=category, cluster=cluster)
+            await self.touch_feed_state(language=language, vertical=vertical, category="All", cluster=cluster)
 
         return article
 
@@ -306,6 +320,7 @@ class ArticleRepository:
         source_name: str,
         source_url: str,
         language: str,
+        vertical: str,
         entry_guid: str,
         content_hash: str,
         category_hint: str | None,
@@ -324,6 +339,7 @@ class ArticleRepository:
                 source_name=source_name,
                 source_url=source_url,
                 language=language,
+                vertical=vertical,
                 entry_guid=entry_guid,
                 content_hash=content_hash,
                 category_hint=category_hint,
@@ -335,21 +351,26 @@ class ArticleRepository:
         raw_entry.article_id = article_id
         raw_entry.source_url = source_url
         raw_entry.language = language
+        raw_entry.vertical = vertical
         raw_entry.content_hash = content_hash
         raw_entry.category_hint = category_hint
         raw_entry.raw_payload = raw_payload
         return raw_entry
 
-    async def get_feed_state(self, *, language: str, category: str) -> FeedState | None:
-        stmt = select(FeedState).where(FeedState.language == language, FeedState.category == category)
+    async def get_feed_state(self, *, language: str, vertical: str, category: str) -> FeedState | None:
+        stmt = select(FeedState).where(
+            FeedState.language == language,
+            FeedState.vertical == vertical,
+            FeedState.category == category,
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def touch_feed_state(self, *, language: str, category: str, cluster: StoryCluster) -> FeedState:
-        state = await self.get_feed_state(language=language, category=category)
-        latest_cursor = await self.get_latest_cursor(language=language, category=category)
+    async def touch_feed_state(self, *, language: str, vertical: str, category: str, cluster: StoryCluster) -> FeedState:
+        state = await self.get_feed_state(language=language, vertical=vertical, category=category)
+        latest_cursor = await self.get_latest_cursor(language=language, vertical=vertical, category=category)
         if state is None:
-            state = FeedState(language=language, category=category, version=1, latest_cursor=latest_cursor)
+            state = FeedState(language=language, vertical=vertical, category=category, version=1, latest_cursor=latest_cursor)
             self.session.add(state)
             return state
 
@@ -357,11 +378,12 @@ class ArticleRepository:
         state.latest_cursor = latest_cursor
         return state
 
-    async def get_latest_cursor(self, *, language: str, category: str) -> str | None:
+    async def get_latest_cursor(self, *, language: str, vertical: str, category: str) -> str | None:
         stmt = (
             select(StoryCluster, Article)
             .join(Article, Article.id == StoryCluster.representative_article_id)
             .where(StoryCluster.language == language)
+            .where(StoryCluster.vertical == vertical)
             .order_by(
                 Article.source_priority.desc(),
                 Article.published_at.desc().nullslast(),
