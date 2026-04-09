@@ -1,5 +1,6 @@
 import asyncio
 
+from app.core.database import create_db_and_tables
 from app.core.logging import configure_logging
 from app.services.ingestion import IngestionService
 from app.workers.celery_app import celery_app
@@ -17,10 +18,9 @@ def enqueue_ingestion_sync() -> str:
 
 
 async def _run_ingestion() -> dict[str, int]:
+    await create_db_and_tables()
     service = await IngestionService.create_for_worker()
-    articles = await IngestionService.fetch_provider_payload()
-    if not articles:
-        articles = IngestionService.build_demo_payload()
+    articles = await service.fetch_provider_payload()
     inserted = await service.ingest_articles(articles)
     await service.article_repository.session.close()
     return {"inserted": inserted}

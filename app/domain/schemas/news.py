@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 class NewsItemResponse(BaseModel):
     id: UUID
+    cursor: str
     category: str
     image_url: str | None
     source_name: str
@@ -21,6 +22,8 @@ class NewsItemResponse(BaseModel):
 class FeedResponse(BaseModel):
     language: str
     updated_at: datetime
+    has_more: bool
+    next_cursor: str | None
     articles: list[NewsItemResponse]
 
 
@@ -32,3 +35,10 @@ class QueueSyncResponse(BaseModel):
 class SyncResponse(BaseModel):
     inserted: int
     status: str
+
+
+class FeedUpdatesResponse(BaseModel):
+    language: str
+    has_new: bool
+    new_count: int
+    latest_cursor: str | None

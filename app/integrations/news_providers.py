@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html import unescape
+import hashlib
 from re import sub
 from urllib.parse import urlparse
 
@@ -16,12 +17,15 @@ class ProviderArticle:
     canonical_url: str
     language: str
     source_name: str
+    source_url: str
     category: str
     image_url: str | None
     title: str
     description: str
     body: str
     published_at: datetime
+    entry_guid: str
+    raw_payload: dict
 
 
 class BaseNewsProviderClient:
@@ -105,12 +109,15 @@ def _map_rss_payload(
                 canonical_url=link,
                 language=language,
                 source_name=source_name,
+                source_url=link,
                 category=category,
                 image_url=image_url,
                 title=title,
                 description=description,
                 body=body,
                 published_at=published_at,
+                entry_guid=_entry_guid(entry, link),
+                raw_payload=_entry_payload(entry),
             )
         )
     return articles
@@ -201,3 +208,19 @@ def _extract_rss_text(entry: dict, *, prefer_full_text: bool) -> str:
             return cleaned
 
     return ""
+
+
+def _entry_guid(entry: dict, fallback_link: str) -> str:
+    guid = entry.get("id") or entry.get("guid") or entry.get("link") or fallback_link
+    return _clean_text(str(guid))
+
+
+def _entry_payload(entry: dict) -> dict:
+    payload: dict[str, str | int | float | bool | None] = {}
+    for key, value in entry.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            payload[key] = value
+        else:
+            payload[key] = str(value)
+    payload["_payload_hash"] = hashlib.sha256(str(sorted(payload.items())).encode("utf-8")).hexdigest()
+    return payload

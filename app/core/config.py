@@ -31,6 +31,7 @@ class Settings(BaseSettings):
         "https://www.jagonews24.com/rss/rss.xml",
     ]
     default_page_size: int = 20
+    feed_sync_interval_minutes: int = 10
 
 
 @lru_cache

@@ -1,4 +1,7 @@
 from dataclasses import dataclass
+from datetime import datetime
+import hashlib
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -11,12 +14,15 @@ class InboundArticle:
     canonical_url: str
     language: str
     source_name: str
+    source_url: str
     category: str
     image_url: str | None
     title: str
     description: str
     body: str
     published_at: datetime
+    entry_guid: str
+    raw_payload: dict
 
 
 class IngestionService:
@@ -38,7 +44,17 @@ class IngestionService:
                     title=inbound.title,
                     summary=summary,
                     article_body=inbound.body,
-                    metadata_json={"pipeline": "rss"},
+                    source_priority=self._source_priority(inbound.source_name),
+                    metadata_json={"pipeline": "rss", "entry_guid": inbound.entry_guid},
+                    raw_entry={
+                        "source_name": inbound.source_name,
+                        "source_url": inbound.source_url,
+                        "language": inbound.language,
+                        "entry_guid": inbound.entry_guid,
+                        "content_hash": self._content_hash(inbound),
+                        "category_hint": inbound.category,
+                        "raw_payload": inbound.raw_payload,
+                    },
                 )
                 count += 1
 
@@ -67,12 +83,15 @@ class IngestionService:
             canonical_url=article.canonical_url,
             language=article.language,
             source_name=article.source_name,
+            source_url=article.source_url,
             category=article.category,
             image_url=article.image_url,
             title=article.title,
             description=article.description,
             body=article.body,
             published_at=article.published_at,
+            entry_guid=article.entry_guid,
+            raw_payload=article.raw_payload,
         )
 
     @staticmethod
@@ -81,3 +100,30 @@ class IngestionService:
         if len(words) <= word_limit:
             return " ".join(words)
         return f"{' '.join(words[:word_limit]).rstrip()}..."
+
+    @staticmethod
+    def _content_hash(article: InboundArticle) -> str:
+        payload = "|".join(
+            [
+                article.canonical_url,
+                article.title,
+                article.description,
+                article.body,
+            ]
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _source_priority(source_name: str) -> int:
+        normalized = source_name.casefold()
+        priorities = {
+            "the daily star": 100,
+            "bdnews24.com": 95,
+            "prothom alo": 92,
+            "jagonews24.com": 85,
+            "bd24live.com": 75,
+        }
+        for name, priority in priorities.items():
+            if name in normalized:
+                return priority
+        return 50
