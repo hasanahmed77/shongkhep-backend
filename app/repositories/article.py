@@ -20,8 +20,8 @@ class ArticleRepository:
         vertical: str,
         category: str | None,
         limit: int,
-        before: tuple[int, datetime, str] | None = None,
-        after: tuple[int, datetime, str] | None = None,
+        before: tuple[datetime, int, str] | None = None,
+        after: tuple[datetime, int, str] | None = None,
     ) -> list[tuple[StoryCluster, Article, ArticleTranslation]]:
         stmt: Select[tuple[StoryCluster, Article, ArticleTranslation]] = (
             select(StoryCluster, Article, ArticleTranslation)
@@ -31,8 +31,8 @@ class ArticleRepository:
             .where(StoryCluster.vertical == vertical)
             .where(ArticleTranslation.language == language)
             .order_by(
-                Article.source_priority.desc(),
                 Article.published_at.desc().nullslast(),
+                Article.source_priority.desc(),
                 StoryCluster.id.desc(),
             )
             .limit(limit)
@@ -40,16 +40,16 @@ class ArticleRepository:
         if category:
             stmt = stmt.where(StoryCluster.category == category)
         if before:
-            before_priority, before_published_at, before_cluster_id = before
+            before_published_at, before_priority, before_cluster_id = before
             stmt = stmt.where(
                 or_(
-                    Article.source_priority < before_priority,
+                    Article.published_at < before_published_at,
                     and_(
-                        Article.source_priority == before_priority,
+                        Article.published_at == before_published_at,
                         or_(
-                            Article.published_at < before_published_at,
+                            Article.source_priority < before_priority,
                             and_(
-                                Article.published_at == before_published_at,
+                                Article.source_priority == before_priority,
                                 StoryCluster.id < before_cluster_id,
                             ),
                         ),
@@ -57,16 +57,16 @@ class ArticleRepository:
                 )
             )
         if after:
-            after_priority, after_published_at, after_cluster_id = after
+            after_published_at, after_priority, after_cluster_id = after
             stmt = stmt.where(
                 or_(
-                    Article.source_priority > after_priority,
+                    Article.published_at > after_published_at,
                     and_(
-                        Article.source_priority == after_priority,
+                        Article.published_at == after_published_at,
                         or_(
-                            Article.published_at > after_published_at,
+                            Article.source_priority > after_priority,
                             and_(
-                                Article.published_at == after_published_at,
+                                Article.source_priority == after_priority,
                                 StoryCluster.id > after_cluster_id,
                             ),
                         ),
@@ -82,7 +82,7 @@ class ArticleRepository:
         language: str,
         vertical: str,
         category: str | None,
-        after: tuple[int, datetime, str] | None,
+        after: tuple[datetime, int, str] | None,
         limit: int = 20,
     ) -> tuple[int, str | None]:
         if after is None:
@@ -281,7 +281,7 @@ class ArticleRepository:
             article.source_domain = urlparse(canonical_url).netloc
             article.vertical = vertical
             article.category = category
-            article.image_url = image_url
+            article.image_url = image_url or article.image_url
             article.published_at = published_at or article.published_at
             article.source_priority = source_priority
             article.metadata_json = metadata_json or article.metadata_json
@@ -385,8 +385,8 @@ class ArticleRepository:
             .where(StoryCluster.language == language)
             .where(StoryCluster.vertical == vertical)
             .order_by(
-                Article.source_priority.desc(),
                 Article.published_at.desc().nullslast(),
+                Article.source_priority.desc(),
                 StoryCluster.id.desc(),
             )
             .limit(1)
@@ -453,16 +453,16 @@ _STOP_WORDS = {
 }
 
 
-def _newer_than_cursor(after: tuple[int, datetime, str]):
-    after_priority, after_published_at, after_cluster_id = after
+def _newer_than_cursor(after: tuple[datetime, int, str]):
+    after_published_at, after_priority, after_cluster_id = after
     return or_(
-        Article.source_priority > after_priority,
+        Article.published_at > after_published_at,
         and_(
-            Article.source_priority == after_priority,
+            Article.published_at == after_published_at,
             or_(
-                Article.published_at > after_published_at,
+                Article.source_priority > after_priority,
                 and_(
-                    Article.published_at == after_published_at,
+                    Article.source_priority == after_priority,
                     StoryCluster.id > after_cluster_id,
                 ),
             ),
@@ -472,8 +472,8 @@ def _newer_than_cursor(after: tuple[int, datetime, str]):
 
 def _encode_cursor(cluster: StoryCluster, article: Article) -> str:
     published_at = (article.published_at or datetime.now(UTC)).isoformat()
-    return f"{article.source_priority}|{published_at}|{cluster.id}"
+    return f"{published_at}|{article.source_priority}|{cluster.id}"
 
 
-def _encode_cursor_parts(source_priority: int, published_at: datetime, cluster_id) -> str:
-    return f"{source_priority}|{published_at.isoformat()}|{cluster_id}"
+def _encode_cursor_parts(published_at: datetime, source_priority: int, cluster_id) -> str:
+    return f"{published_at.isoformat()}|{source_priority}|{cluster_id}"

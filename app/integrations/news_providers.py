@@ -3,13 +3,17 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html import unescape
 import hashlib
-from re import sub
+import logging
+from re import search, sub
 from urllib.parse import urlparse
 
 import feedparser
 import httpx
 
 from app.core.config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -46,19 +50,30 @@ class RssFeedClient(BaseNewsProviderClient):
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             for feed_language, feed_vertical, feed_entries in feed_groups:
                 for feed_url, forced_category in feed_entries:
-                    response = await client.get(feed_url)
-                    response.raise_for_status()
-                    parsed = feedparser.parse(response.text)
-                    source_name = _rss_source_name(parsed.feed, feed_url)
-                    results.extend(
-                        _map_rss_payload(
-                            parsed.entries,
-                            source_name,
-                            feed_language,
-                            feed_vertical,
-                            forced_category=forced_category,
+                    try:
+                        response = await client.get(feed_url)
+                        response.raise_for_status()
+                        parsed = feedparser.parse(response.text)
+                        source_name = _rss_source_name(parsed.feed, feed_url)
+                        results.extend(
+                            _map_rss_payload(
+                                parsed.entries,
+                                source_name,
+                                feed_language,
+                                feed_vertical,
+                                forced_category=forced_category,
+                            )
                         )
-                    )
+                    except Exception as exc:
+                        logger.warning(
+                            "Skipping feed after fetch/parse failure",
+                            extra={
+                                "feed_url": feed_url,
+                                "language": feed_language,
+                                "vertical": feed_vertical,
+                                "error": str(exc),
+                            },
+                        )
         return _dedupe_articles(results)
 
 
@@ -177,65 +192,167 @@ def _extract_rss_image(entry: dict) -> str | None:
         if enclosure_url:
             return enclosure_url
 
+    media_thumbnail = entry.get("media:thumbnail")
+    if isinstance(media_thumbnail, dict):
+        thumb_url = media_thumbnail.get("url")
+        if thumb_url:
+            return thumb_url
+
+    media_content_alt = entry.get("media:content")
+    if isinstance(media_content_alt, dict):
+        media_url = media_content_alt.get("url")
+        if media_url:
+            return media_url
+
+    html_candidates: list[str] = []
+    content = entry.get("content", [])
+    if content:
+        html_candidates.extend(item.get("value", "") for item in content if item.get("value"))
+    html_candidates.extend(
+        [
+            entry.get("summary", ""),
+            entry.get("description", ""),
+            entry.get("content:encoded", ""),
+            entry.get("summary_detail", {}).get("value", ""),
+        ]
+    )
+
+    for candidate in html_candidates:
+        image_url = _extract_first_image_from_html(candidate)
+        if image_url:
+            return image_url
+
     return None
+
+
+def _extract_first_image_from_html(value: str) -> str | None:
+    if not value:
+        return None
+    match = search(r'<img[^>]+src=["\']([^"\']+)["\']', value, flags=0)
+    if not match:
+        return None
+    return match.group(1).strip()
 
 
 def _infer_rss_category(entry: dict, *, vertical: str) -> str:
     tags = entry.get("tags", [])
+    category_haystack = _category_haystack(entry)
     if vertical == "tech":
-        for tag in tags:
-            term = _clean_text(tag.get("term", ""))
-            normalized = term.casefold()
-            if "ai" in normalized:
-                return "AI"
-            if "startup" in normalized:
-                return "Startups"
-            if "device" in normalized or "hardware" in normalized or "pixel" in normalized:
-                return "Devices"
-            if "android" in normalized or "platform" in normalized or "cloud" in normalized:
-                return "Platforms"
+        if _matches_any(category_haystack, "ai", "artificial intelligence"):
+            return "AI"
+        if _matches_any(category_haystack, "startup"):
+            return "Startups"
+        if _matches_any(category_haystack, "device", "hardware", "pixel"):
+            return "Devices"
+        if _matches_any(category_haystack, "android", "platform", "cloud"):
+            return "Platforms"
         return "AI"
     if vertical == "science":
-        for tag in tags:
-            term = _clean_text(tag.get("term", ""))
-            normalized = term.casefold()
-            if "space" in normalized or "mars" in normalized or "moon" in normalized:
-                return "Space"
-            if "research" in normalized or "study" in normalized:
-                return "Research"
-            if "health" in normalized or "medicine" in normalized:
-                return "Health"
-            if "climate" in normalized or "earth" in normalized or "environment" in normalized:
-                return "Climate"
+        if _matches_any(category_haystack, "space", "mars", "moon"):
+            return "Space"
+        if _matches_any(category_haystack, "research", "study"):
+            return "Research"
+        if _matches_any(category_haystack, "health", "medicine"):
+            return "Health"
+        if _matches_any(category_haystack, "climate", "earth", "environment"):
+            return "Climate"
         return "Research"
     if vertical == "gaming":
         source_url = _clean_text(entry.get("link", "")).casefold()
         if "ps-store" in source_url or "store" in source_url or "sale" in source_url or "discount" in source_url:
             return "Sales"
-        for tag in tags:
-            term = _clean_text(tag.get("term", ""))
-            normalized = term.casefold()
-            if "sale" in normalized or "discount" in normalized or "store" in normalized:
-                return "Sales"
-            if "release" in normalized or "launch" in normalized:
-                return "Releases"
-            if "review" in normalized:
-                return "Reviews"
-            if "xbox" in normalized or "playstation" in normalized or "platform" in normalized:
-                return "Platform News"
+        if _matches_any(category_haystack, "sale", "discount", "store"):
+            return "Sales"
+        if _matches_any(category_haystack, "release", "launch"):
+            return "Releases"
+        if _matches_any(category_haystack, "review"):
+            return "Reviews"
+        if _matches_any(category_haystack, "xbox", "playstation", "platform"):
+            return "Platform News"
         return "Platform News"
-    for tag in tags:
-        term = _clean_text(tag.get("term", ""))
-        normalized = term.casefold()
-        if "polit" in normalized or "elect" in normalized or "gov" in normalized:
-            return "Politics"
-        if "business" in normalized or "econom" in normalized or "market" in normalized:
-            return "Business"
-        if "tech" in normalized or "science" in normalized:
-            return "Technology"
-        if "sport" in normalized or "cricket" in normalized or "football" in normalized:
-            return "Sports"
+    if _matches_any(
+        category_haystack,
+        "polit",
+        "elect",
+        "gov",
+        "রাজনীতি",
+        "নির্বাচন",
+        "সরকার",
+        "সংসদ",
+        "মন্ত্রী",
+        "আওয়ামী লীগ",
+        "বিএনপি",
+    ):
+        return "Politics"
+    if _matches_any(
+        category_haystack,
+        "business",
+        "econom",
+        "market",
+        "trade",
+        "stock",
+        "ব্যবসা",
+        "অর্থনীতি",
+        "বাজার",
+        "শেয়ার",
+        "বাণিজ্য",
+        "রপ্তানি",
+        "আমদানি",
+        "ব্যাংক",
+    ):
+        return "Business"
+    if _matches_any(
+        category_haystack,
+        "tech",
+        "technology",
+        "science",
+        "software",
+        "internet",
+        "startup",
+        "প্রযুক্তি",
+        "বিজ্ঞান",
+        "সফটওয়্যার",
+        "সফটওয়ার",
+        "ইন্টারনেট",
+        "মোবাইল",
+        "ডিজিটাল",
+    ):
+        return "Technology"
+    if _matches_any(
+        category_haystack,
+        "sport",
+        "cricket",
+        "football",
+        "match",
+        "tournament",
+        "ক্রীড়া",
+        "খেলা",
+        "ক্রিকেট",
+        "ফুটবল",
+        "টুর্নামেন্ট",
+    ):
+        return "Sports"
     return "World"
+
+
+def _category_haystack(entry: dict) -> str:
+    tags = entry.get("tags", [])
+    tag_terms = " ".join(_clean_text(tag.get("term", "")) for tag in tags)
+    return " ".join(
+        part
+        for part in [
+            tag_terms,
+            _clean_text(entry.get("title", "")),
+            _clean_text(entry.get("summary", "")),
+            _clean_text(entry.get("description", "")),
+            _clean_text(entry.get("link", "")),
+        ]
+        if part
+    ).casefold()
+
+
+def _matches_any(haystack: str, *needles: str) -> bool:
+    return any(needle.casefold() in haystack for needle in needles)
 
 
 def _parse_rss_datetime(value: str | None) -> datetime:

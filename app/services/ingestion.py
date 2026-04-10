@@ -121,9 +121,9 @@ class IngestionService:
     def _source_priority(source_name: str) -> int:
         normalized = source_name.casefold()
         priorities = {
-            "the daily star": 100,
-            "bdnews24.com": 95,
-            "prothom alo": 92,
+            "prothom alo": 100,
+            "the daily star": 95,
+            "bdnews24.com": 92,
             "jagonews24.com": 85,
             "bd24live.com": 75,
         }

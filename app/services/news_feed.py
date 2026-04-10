@@ -77,14 +77,14 @@ class NewsFeedService:
 
 def _encode_cursor(cluster, article) -> str:
     published_at = (article.published_at or datetime.now(UTC)).isoformat()
-    return f"{article.source_priority}|{published_at}|{cluster.id}"
+    return f"{published_at}|{article.source_priority}|{cluster.id}"
 
 
-def _decode_cursor(cursor: str | None) -> tuple[int, datetime, uuid.UUID] | None:
+def _decode_cursor(cursor: str | None) -> tuple[datetime, int, uuid.UUID] | None:
     if not cursor:
         return None
     try:
-        source_priority, published_at, cluster_id = cursor.split("|", 2)
-        return int(source_priority), datetime.fromisoformat(published_at), uuid.UUID(cluster_id)
+        published_at, source_priority, cluster_id = cursor.split("|", 2)
+        return datetime.fromisoformat(published_at), int(source_priority), uuid.UUID(cluster_id)
     except ValueError:
         return None
